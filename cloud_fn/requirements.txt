@@ -1,0 +1,2 @@
+functions-framework==3.*
+feast[gcp,redis]==0.25.0

@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "feast-gcp"
+version = "0.1.0"
+description = ""
+authors = ["Quy Dinh <dvquy.13@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.11"
+feast = { version = ">=0.24", extras = [ "redis", "gcp" ] }
+google-cloud-bigquery = ">=3.0.0"  # if not specify then poetry install 2.x.x version which is not compatible
+psycopg2-binary = "*"  # For Macbook M1
+gcsfs = "*"  # For file-based offline store, can remove after changing offline store to BigQuery
+functions-framework = "^3.2.0"  # For testing Cloud Functions at local
+
+# For Web service deployed on Cloud Run
+fastapi = "*"
+uvicorn = "*"
+
+[tool.poetry.dev-dependencies]
+jupyterlab = "*"
+tqdm = "*"
+jupyter = "*"
+black = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,154 @@
+name: Plan resources
+
+on: [pull_request]
+
+jobs:
+  feast_plan:
+    runs-on: ubuntu-latest
+    env:
+      FEAST_VERSION: "0.25.0"
+      ENV: "prod"
+    steps:
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.8"
+          architecture: x64
+
+      - uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: |
+          pip install 'feast[gcp,redis]=='$FEAST_VERSION
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Use gcloud CLI
+        run: gcloud info
+
+      - name: Feast Plan
+        id: plan
+        env:
+          FEAST_USAGE: "False"
+          FEAST_FORCE_USAGE_UUID: None
+          IS_TEST: "True"
+        run: |
+          body=$(feast --chdir feature_repo/ --feature-store-yaml feature_repo/$ENV/feature_store.yaml plan)
+          body="${body//'%'/'%25'}"
+          body="${body//$'\n'/'%0A'}"
+          body="${body//$'\r'/'%0D'}"
+          echo "::set-output name=body::$body"
+
+      - name: Update Pull Request
+        uses: actions/github-script@v6
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "feast\n${{ steps.plan.outputs.body }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Feast Plan \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Feast Plan</summary>
+
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  terraform_plan:
+    env:
+      CLOUD_RUN_MAIN_IMAGE: "asia.gcr.io/feast-gcp-project-id/feast-gcp:0.1.0"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          export_default_credentials: true
+
+      - name: Use gcloud CLI
+        run: gcloud info
+
+      - name: Build Cloud Run Main Image
+        run: |
+          docker build -t $CLOUD_RUN_MAIN_IMAGE .
+          gcloud auth configure-docker
+          docker push $CLOUD_RUN_MAIN_IMAGE
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform -chdir=infra/ fmt -check
+
+      - name: Terraform Init
+        id: init
+        run: |
+          terraform -chdir=infra/ init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform -chdir=infra/ validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        if: github.event_name == 'pull_request'
+        run: |
+          terraform -chdir=infra/ plan -var="cloud_run_env=prod" -no-color -input=false
+        continue-on-error: true
+
+      # Ref: https://learn.hashicorp.com/tutorials/terraform/github-actions
+      - name: Update Pull Request
+        uses: actions/github-script@v6
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style \`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization \`${{ steps.init.outcome }}\`
+            #### Terraform Plan \`${{ steps.plan.outcome }}\`
+            #### Terraform Validation \`${{ steps.validate.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

@@ -1,0 +1,10 @@
+project: feast_gcp
+provider: gcp
+entity_key_serialization_version: 2
+registry: local/data/registry.db
+online_store:
+  type: redis
+  connection_string: "localhost:6379"
+offline_store:
+  type: bigquery
+  dataset: feast_temp
